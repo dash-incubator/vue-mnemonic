@@ -9,16 +9,16 @@
         <div class="words">
             <div
                 class="word"
-                ref="words"
                 v-bind:key="i"
+                v-bind:ref="setWords"
                 v-for="(word, i) in mnemonic"
             >
                 <input
                     class="word-text"
-                    ref="fields"
                     type="text"
                     v-bind:key="i"
                     v-bind:index="i"
+                    v-bind:ref="setFields"
                     v-model="mnemonic[i]"
                     @focus="refocus"
                     @keydown="keydown"
@@ -32,9 +32,9 @@
             <div class="filtered-scrollbar" ref="suggestionContainer">
                 <div
                     class="filtered-button"
-                    ref="suggestions"
                     v-bind:class="mnemonic[index.field] === word || i === index.suggestion ? 'filtered-button--active' : ''"
                     v-bind:key="i"
+                    v-bind:ref="setSuggestions"
                     v-for="(word, i) in suggestions"
                     @click="set(word)"
                 >
@@ -2106,6 +2106,13 @@
     ];
 
     export default {
+        beforeUpdate() {
+            this.refs = {
+                fields: [],
+                suggestions: [],
+                words: []
+            };
+        },
         data() {
             return {
                 focus: false,
@@ -2114,27 +2121,32 @@
                     suggestion: 0
                 },
                 mnemonic: [''],
+                refs: {
+                    fields: [],
+                    suggestions: [],
+                    words: []
+                },
                 suggestions: [],
                 whitelist
             };
         },
         methods: {
             filter: function (e, value) {
-                this.$set(this, 'suggestions', this.whitelist.filter((word) => {
+                this.suggestions = this.whitelist.filter((word) => {
                     return value && word.startsWith(value);
-                }));
+                });
 
                 if (this.suggestions.length === 0) {
                     this.focus = e.target;
-                    this.$refs.words[this.index.field].classList.add('word--error');
+                    this.refs.words[this.index.field].classList.add('word--error');
                 }
                 else {
                     this.focus = false;
-                    this.$refs.words[this.index.field].classList.remove('word--error');
+                    this.refs.words[this.index.field].classList.remove('word--error');
                 }
 
                 if (this.suggestions.length < this.index.suggestion) {
-                    this.$set(this.index, 'suggestion', 0);
+                    this.index.suggestion = 0;
                 }
             },
             keydown: function(e) {
@@ -2147,9 +2159,8 @@
                 e.preventDefault();
 
                 if (!value) {
-                    if (!this.focus) {
-                        this.focus = false;
-                        this.$refs.words[this.index.field].classList.remove('word--error');
+                    if (this.focus) {
+                        this.refs.words[this.index.field].classList.remove('word--error');
                     }
 
                     this.index.field--;
@@ -2159,7 +2170,8 @@
                     }
 
                     this.$nextTick(() => {
-                        this.$refs.fields[this.index.field].focus();
+                        this.focus = this.refs.fields[this.index.field];
+                        this.refs.fields[this.index.field].focus();
                     });
                 }
             },
@@ -2169,13 +2181,14 @@
             // 16 = Shift
             // 32 = Spacebar
             keyup: function (e) {
-                let mnemonic = this.mnemonic,
+                let error = false,
+                    mnemonic = this.mnemonic,
                     value = e.target.value.trim();
 
                 if (e.keyCode === 9) {
                     e.preventDefault();
 
-                    if (!value && e.shiftKey) {
+                    if (e.shiftKey) {
                         return;
                     }
                 }
@@ -2184,11 +2197,11 @@
                     return;
                 }
 
-                if (!this.focus || this.focus === e.target) {
-                    this.filter(e, value);
-                }
-
                 if (value) {
+                    if (!this.focus || this.focus === e.target) {
+                        this.filter(e, value);
+                    }
+
                     if (e.keyCode === 9) {
                         if (e.shiftKey) {
                             this.index.suggestion--;
@@ -2201,19 +2214,11 @@
                             this.index.suggestion = 0;
                         }
 
-                        this.$set(this.index, 'suggestion', this.index.suggestion);
-
-                        let selected = (this.$refs.suggestions || [])[this.index.suggestion] || false;
+                        let selected = (this.refs.suggestions || [])[this.index.suggestion] || false;
 
                         if (selected) {
                             selected.scrollIntoView();
                         }
-
-                        // if (selected && selected.offsetLeft > (this.$refs.suggestionContainer.scrollLeft + this.$refs.suggestionContainer.clientWidth)) {
-                        //     this.$refs.suggestionContainer.scrollLeft = selected.offsetLeft - 2;
-                        // }
-
-                        e.target.focus();
                     }
                 }
 
@@ -2228,12 +2233,28 @@
                         mnemonic = value.split(/[ ,]+/)
                             .map(s => s.trim())
                             .filter(s => s);
+
+                        for (let i = 0, n = mnemonic.length; i < n; i++) {
+                            let word = mnemonic[i];
+
+                            if (!this.whitelist.includes(word)) {
+                                error = i;
+
+                                if (i > 0) {
+                                    mnemonic = mnemonic.slice(0, i);
+                                }
+                                else {
+                                    mnemonic = [mnemonic.join(' ')].filter(w => w);
+                                }
+                                break;
+                            }
+                        }
                     }
                     // Invalid Entry, Bail
                     else if (this.suggestions.length === 0 || (!value && e.keyCode !== 9)) {
                         return;
                     }
-                    // Insert Word Using Active Index
+                    // Insert Word Using Active Suggestion Index
                     else {
                         mnemonic.splice(this.index.field, 1, (this.suggestions[this.index.suggestion] || this.suggestions[0]));
                     }
@@ -2242,13 +2263,13 @@
                     mnemonic.splice(this.index.field, 1, value);
                 }
 
-                if ((parseInt(this.index.field) + 1) === this.mnemonic.length) {
+                if (error === false && (parseInt(this.index.field) + 1) === this.mnemonic.length) {
                     mnemonic.push('');
                 }
 
                 if (this.focus) {
                     this.focus = false;
-                    this.$refs.words[this.index.field].classList.remove('word--error');
+                    this.refs.words[this.index.field].classList.remove('word--error');
                 }
 
                 this.mnemonic = mnemonic.slice(0, 12);
@@ -2256,21 +2277,31 @@
                 this.index.suggestion = 0;
                 this.index.field++;
 
-                // get index of next whitespace
+                // Index Of Next Whitespace
                 let index = mnemonic.indexOf('');
 
                 this.index.field = index !== -1 ? index : this.index.field;
+
+                if (this.index.field < 0 || this.index.field > (mnemonic.length - 1)) {
+                    this.index.field = (mnemonic.length - 1);
+                }
 
                 if (this.index.field >= 12) {
                     this.index.field = 11;
                 }
 
                 this.$nextTick(() => {
-                    this.$refs.fields[this.index.field].focus();
+                    if (error !== false) {
+                        this.focus = this.refs.fields[error];
+                        this.refs.words[error].classList.add('word--error');
+                    }
+                    else {
+                        this.refs.fields[this.index.field].focus();
+                    }
 
                     if (this.mnemonic.filter(w => whitelist.includes(w)).length === 12) {
                         setTimeout(() => {
-                            this.$set(this, 'suggestions', []);
+                            this.suggestions = [];
                             alert(this.mnemonic.join(' '));
                         }, 100);
                     }
@@ -2278,7 +2309,7 @@
             },
             refocus: function (e) {
                 if (this.focus) {
-                    if (e.target !== this.focus) {
+                    if (e.target != this.focus) {
                         this.$nextTick(() => {
                             this.focus.focus();
                         });
@@ -2289,10 +2320,10 @@
                 }
             },
             set: function (word) {
-                this.$refs.fields[this.index.field].focus();
+                this.refs.fields[this.index.field].focus();
 
-                this.$set(this.mnemonic, this.index.field, word);
-                this.$set(this, 'suggestions', []);
+                this.mnemonic[this.index.field] = word;
+                this.suggestions = [];
 
                 this.index.field++;
 
@@ -2306,10 +2337,28 @@
                 }
 
                 this.$nextTick(() => {
-                    this.$refs.fields[this.index.field].focus();
+                    this.refs.fields[this.index.field].focus();
                 });
             },
+            setFields: function (el) {
+                if (el) {
+                    this.refs.fields.push(el);
+                }
+            },
+            setSuggestions: function (el) {
+                if (el) {
+                    this.refs.suggestions.push(el);
+                }
+            },
+            setWords: function (el) {
+                if (el) {
+                    this.refs.words.push(el);
+                }
+            },
         },
+        mounted() {
+            this.refs.fields[0].focus();
+        }
     };
 </script>
 
